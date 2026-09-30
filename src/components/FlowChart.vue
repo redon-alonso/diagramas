@@ -188,17 +188,22 @@ const STYLE_PROPS = ['fill', 'stroke', 'stroke-width', 'stroke-dasharray', 'font
 function buildExportSvg() {
   const src = svgEl.value
   const clone = src.cloneNode(true)
+  // Lo propio de la vista (zoom, resaltados de la ejecución, contadores) no se exporta.
+  clone.querySelector('g.world')?.removeAttribute('transform')
+  // Los estilos vienen de CSS: se copian como estilo en línea para que el fichero se vea igual fuera.
   const srcEls = src.querySelectorAll('*')
   const dstEls = clone.querySelectorAll('*')
+  const drop = []
   srcEls.forEach((el, i) => {
+    if (el.closest('.badge, .hot-under, .glow')) {
+      drop.push(dstEls[i])
+      return
+    }
     const cs = getComputedStyle(el)
-    const decl = STYLE_PROPS.map((p) => `${p}:${cs.getPropertyValue(p)}`).join(';')
-    dstEls[i].setAttribute('style', decl)
+    dstEls[i].setAttribute('style', STYLE_PROPS.map((p) => `${p}:${cs.getPropertyValue(p)}`).join(';'))
     dstEls[i].removeAttribute('class')
   })
-  const root = clone.querySelector('g.world')
-  root.removeAttribute('transform')
-  clone.querySelectorAll('.badge, .hot-under').forEach((el) => el.remove())
+  drop.forEach((el) => el.remove())
   const { width, height } = flow.value
   clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
   clone.setAttribute('viewBox', `0 0 ${width} ${height}`)
@@ -224,19 +229,41 @@ function download(blob, filename) {
   a.href = url
   a.download = filename
   a.rel = 'noopener'
+  a.style.display = 'none'
+  document.body.appendChild(a)
   a.click()
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 4000)
+}
+
+const exportError = ref(null)
+
+function failExport(err) {
+  exportError.value = 'No se pudo generar la imagen. Prueba de nuevo o usa el formato SVG.'
+  setTimeout(() => { exportError.value = null }, 5000)
+  if (err) console.error(err)
 }
 
 function exportSvg() {
   if (!flow.value) return
-  const { text } = buildExportSvg()
-  download(new Blob([text], { type: 'image/svg+xml' }), `${fileBase()}.svg`)
+  try {
+    const { text } = buildExportSvg()
+    download(new Blob([text], { type: 'image/svg+xml' }), `${fileBase()}.svg`)
+  } catch (err) {
+    failExport(err)
+  }
 }
 
 function exportPng() {
   if (!flow.value) return
-  const { text, width, height } = buildExportSvg()
+  let built
+  try {
+    built = buildExportSvg()
+  } catch (err) {
+    failExport(err)
+    return
+  }
+  const { text, width, height } = built
   const url = URL.createObjectURL(new Blob([text], { type: 'image/svg+xml' }))
   const img = new Image()
   img.onload = () => {
@@ -248,9 +275,12 @@ function exportPng() {
     ctx.scale(scale, scale)
     ctx.drawImage(img, 0, 0)
     URL.revokeObjectURL(url)
-    canvas.toBlob((blob) => blob && download(blob, `${fileBase()}.png`), 'image/png')
+    canvas.toBlob((blob) => (blob ? download(blob, `${fileBase()}.png`) : failExport()), 'image/png')
   }
-  img.onerror = () => URL.revokeObjectURL(url)
+  img.onerror = () => {
+    URL.revokeObjectURL(url)
+    failExport()
+  }
   img.src = url
 }
 </script>
@@ -368,6 +398,8 @@ function exportPng() {
       <span class="sep" />
       <button type="button" class="btn ghost" :aria-expanded="showLegend" @click="showLegend = !showLegend">Leyenda</button>
     </div>
+
+    <p v-if="exportError" class="export-error" role="alert">{{ exportError }}</p>
 
     <div v-if="showLegend" class="legend">
       <svg viewBox="0 0 440 176" role="img" aria-label="Leyenda de formas">
@@ -658,6 +690,20 @@ function exportPng() {
   width: 1px;
   height: 20px;
   background: var(--rule);
+}
+
+.export-error {
+  position: absolute;
+  right: 12px;
+  bottom: 62px;
+  margin: 0;
+  padding: 6px 10px;
+  border: 1.5px solid var(--red);
+  border-radius: var(--radius-s);
+  background: var(--panel);
+  color: var(--red);
+  font-size: 13.5px;
+  font-weight: 600;
 }
 
 .legend {
