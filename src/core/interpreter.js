@@ -3,11 +3,13 @@
 // Cuenta las operaciones con el mismo modelo que el análisis estático (ver cost.js).
 
 import { COST_MODEL } from './cost.js'
+import { walk, walkExpr, stmtExprs } from './parser.js'
 
 export class RuntimeError extends Error {
-  constructor(message, line) {
+  constructor(message, line, kind = 'error') {
     super(message)
     this.line = line
+    this.kind = kind
   }
 }
 
@@ -20,7 +22,7 @@ class ReturnSignal {
 const MAX_OUTPUT_LINES = 2000
 const MAX_STRING = 10000
 const MAX_LIST = 1_000_000
-const MAX_DEPTH = 800
+const MAX_DEPTH = 400
 
 const WORDS = {
   es: { true: 'VERDADERO', false: 'FALSO', null: 'NULO' },
@@ -77,8 +79,13 @@ export function parseInput(raw, depth = 0) {
 
 const typeName = (v) => (v === null ? 'NULO' : Array.isArray(v) ? 'una lista' : typeof v === 'number' ? 'un número' : typeof v === 'boolean' ? 'un valor lógico' : 'un texto')
 
+const SKIP = Symbol('skip')
+const MAX_SEEN_STATES = 20_000
+const MAX_STATE_SIZE = 3000
+
 export function createRun(ast, options = {}) {
   const maxSteps = options.maxSteps ?? 200_000
+  const detectCycles = options.detectCycles !== false
   const lang = ast.lang === 'en' ? 'en' : 'es'
   const functions = new Map(ast.functions.map((f) => [f.name, f]))
   const state = {
@@ -98,12 +105,172 @@ export function createRun(ast, options = {}) {
   }
   const frame = () => state.frames.at(-1)
 
+  // -------------------------------------------------------------------------
+  // Detección de bucles y recursiones infinitas
+  //
+  // El programa es determinista salvo por LEER y ALEATORIO. Si al volver a la condición de un
+  // bucle todas las variables valen exactamente lo mismo que en una vuelta anterior, el bucle
+  // repetirá siempre las mismas vueltas: no puede terminar. Igual con una función que vuelve a
+  // llamarse con los mismos valores antes de terminar la llamada anterior.
+  // -------------------------------------------------------------------------
+
+  const nondetCache = new WeakMap()
+
+  /** ¿Puede este bloque (o lo que llama) dar resultados distintos con el mismo estado? */
+  function isNondeterministic(stmts, visiting = new Set()) {
+    if (nondetCache.has(stmts)) return nondetCache.get(stmts)
+    let found = false
+    walk(stmts, (st) => {
+      if (found) return
+      if (st.type === 'read') { found = true; return }
+      for (const e of stmtExprs(st)) {
+        walkExpr(e, (x) => {
+          if (found || x.k !== 'call') return
+          if (x.builtin === 'random') found = true
+          else if (!x.builtin && !visiting.has(x.name)) {
+            const fn = functions.get(x.name)
+            visiting.add(x.name)
+            if (fn && isNondeterministic(fn.body, visiting)) found = true
+          }
+        })
+      }
+    })
+    nondetCache.set(stmts, found)
+    return found
+  }
+
+  const loopIsNondet = (s) => isNondeterministic([s])
+
+  const varsOf = (exprs) => {
+    const out = new Set()
+    for (const e of exprs) walkExpr(e, (x) => { if (x.k === 'var') out.add(x.name) })
+    return out
+  }
+  const callsUser = (exprs) => {
+    let found = false
+    for (const e of exprs) walkExpr(e, (x) => { if (x.k === 'call' && !x.builtin) found = true })
+    return found
+  }
+
+  const relevantCache = new WeakMap()
+
+  /**
+   * Variables de las que depende que el bucle termine: las de la condición y, de forma transitiva,
+   * las que se usan para calcularlas dentro del cuerpo (también las de los SI que controlan esas
+   * asignaciones). Si solo esas se repiten, el bucle ya no puede terminar aunque cambien otras.
+   * Devuelve null si hay llamadas a funciones (pueden modificar listas): entonces se compara todo.
+   */
+  function relevantVars(s) {
+    if (relevantCache.has(s)) return relevantCache.get(s)
+    const records = []
+    let opaque = false
+    const visit = (stmts, ctrl) => {
+      for (const st of stmts) {
+        const exprs = stmtExprs(st)
+        if (callsUser(exprs)) opaque = true
+        if (st.type === 'assign') {
+          records.push({ target: st.target.name, deps: new Set([...varsOf([st.expr, ...st.target.indexes]), ...ctrl]) })
+        } else if (st.type === 'for') {
+          records.push({ target: st.var, deps: new Set([...varsOf([st.from, st.to]), ...ctrl]) })
+        }
+        if (st.type === 'if') {
+          const inner = new Set([...ctrl, ...varsOf([st.cond])])
+          visit(st.then, inner)
+          if (st.else) visit(st.else, inner)
+        } else if (st.type === 'while' || st.type === 'repeat') {
+          visit(st.body, new Set([...ctrl, ...varsOf([st.cond])]))
+        } else if (st.type === 'for') {
+          visit(st.body, new Set([...ctrl, st.var, ...varsOf([st.from, st.to])]))
+        }
+      }
+    }
+    const condExprs = s.type === 'for' ? [] : [s.cond]
+    if (callsUser(condExprs)) opaque = true
+    visit(s.body, new Set())
+    let result = null
+    if (!opaque) {
+      const rel = s.type === 'for' ? new Set([s.var]) : varsOf(condExprs)
+      let grew = true
+      while (grew) {
+        grew = false
+        for (const r of records) {
+          if (!rel.has(r.target)) continue
+          for (const d of r.deps) if (!rel.has(d)) { rel.add(d); grew = true }
+        }
+      }
+      result = rel
+    }
+    relevantCache.set(s, result)
+    return result
+  }
+
+  function encode(v, budget, depth = 0) {
+    if (--budget.left < 0 || depth > 4) throw SKIP
+    if (Array.isArray(v)) return `[${v.map((x) => encode(x, budget, depth + 1)).join(',')}]`
+    if (typeof v === 'string') return JSON.stringify(v)
+    if (v === null || v === undefined) return 'N'
+    return typeof v === 'boolean' ? (v ? 'T' : 'F') : String(v)
+  }
+
+  /** Huella del estado de la llamada actual, o null si es demasiado grande para compararla. */
+  function signature(values) {
+    const budget = { left: MAX_STATE_SIZE }
+    try {
+      return values.map(([k, v]) => `${k}=${encode(v, budget)}`).join(';')
+    } catch (err) {
+      if (err === SKIP) return null
+      throw err
+    }
+  }
+
+  function describeVars(only) {
+    const shown = [...frame().vars]
+      .filter(([k, v]) => !Array.isArray(v) && (!only || only.has(k)))
+      .slice(0, 4)
+      .map(([k, v]) => `${k} = ${formatValue(v, lang)}`)
+    return shown.length ? ` (${shown.join(', ')})` : ''
+  }
+
+  /** Crea un vigilante para una ejecución concreta de un bucle. */
+  function loopGuard(s) {
+    if (!detectCycles || loopIsNondet(s)) return () => {}
+    const seen = new Set()
+    let active = true
+    const line = s.type === 'repeat' ? s.endLine ?? s.line : s.line
+    const rel = relevantVars(s)
+    return () => {
+      if (!active) return
+      const vars = [...frame().vars]
+      const sig = signature(rel ? vars.filter(([k]) => rel.has(k)) : vars)
+      if (sig === null) { active = false; return }
+      if (seen.has(sig)) {
+        state.current = s.id
+        state.currentFn = frame().name
+        const what = rel
+          ? 'las variables de las que depende la condición valen lo mismo que en una vuelta anterior'
+          : 'todas las variables valen lo mismo que en una vuelta anterior'
+        throw new RuntimeError(
+          `Bucle infinito: al volver a comprobar la condición, ${what}${describeVars(rel)}. ` +
+          'Nada de lo que hace el bucle le acerca a su fin. Revisa que dentro cambie la variable que controla la condición.',
+          line,
+          'loop',
+        )
+      }
+      seen.add(sig)
+      if (seen.size > MAX_SEEN_STATES) active = false
+    }
+  }
+
   function visit(id) {
     state.visits.set(id, (state.visits.get(id) ?? 0) + 1)
     state.current = id
     state.currentFn = frame().name
     if (++state.steps > maxSteps) {
-      throw new RuntimeError(`Se alcanzó el límite de ${maxSteps.toLocaleString('es')} pasos: probablemente es un bucle infinito o una recursión sin fin.`, null)
+      throw new RuntimeError(
+        `Se alcanzó el límite de ${maxSteps.toLocaleString('es')} pasos sin terminar. Puede ser un bucle infinito o simplemente un algoritmo muy largo: si esperas que termine, sube el límite de pasos.`,
+        null,
+        'limit',
+      )
     }
   }
 
@@ -245,8 +412,20 @@ export function createRun(ast, options = {}) {
     if (state.frames.length >= MAX_DEPTH) {
       throw new RuntimeError(`Demasiadas llamadas anidadas (${MAX_DEPTH}): ¿falta el caso base de la recursión?`, line)
     }
+    let entrySig = null
+    if (detectCycles && !isNondeterministic(fn.body)) {
+      entrySig = signature(fn.params.map((p, i) => [p, args[i]]))
+      if (entrySig !== null && state.frames.some((f) => f.name === fn.name && f.entrySig === entrySig)) {
+        const shown = args.map((a) => (Array.isArray(a) ? `[…${a.length}]` : formatValue(a, lang))).join(', ')
+        throw new RuntimeError(
+          `Recursión infinita: ${fn.name}(${shown}) se vuelve a llamar con los mismos valores antes de terminar la llamada anterior, así que no llegará nunca al caso base. Revisa que la llamada recursiva acerque los valores al caso base.`,
+          line,
+          'recursion',
+        )
+      }
+    }
     state.calls++
-    state.frames.push({ name: fn.name, vars: new Map(fn.params.map((p, i) => [p, args[i]])), callLine: line })
+    state.frames.push({ name: fn.name, vars: new Map(fn.params.map((p, i) => [p, args[i]])), callLine: line, entrySig })
     state.maxDepth = Math.max(state.maxDepth, state.frames.length)
     let result = null
     visit(`fstart:${fn.name}`)
@@ -360,7 +539,9 @@ export function createRun(ast, options = {}) {
         break
       }
       case 'while': {
+        const guard = loopGuard(s)
         for (;;) {
+          guard()
           const ok = truthy(yield* evaluate(s.cond, s.line))
           visit(s.id)
           state.lastBranch = ok ? 'yes' : 'no'
@@ -371,9 +552,11 @@ export function createRun(ast, options = {}) {
         break
       }
       case 'repeat': {
+        const guard = loopGuard(s)
         for (;;) {
           visit(`${s.id}:top`)
           yield* block(s.body)
+          guard()
           const done = truthy(yield* evaluate(s.cond, s.endLine ?? s.line))
           visit(s.id)
           state.lastBranch = done ? 'yes' : 'no'
@@ -389,7 +572,9 @@ export function createRun(ast, options = {}) {
         needNumber(to, 'El valor final de PARA', s.line)
         setVar(s.var, from)
         state.ops += COST_MODEL.forInit
+        const guard = loopGuard(s)
         for (;;) {
+          guard()
           const value = frame().vars.get(s.var)
           if (typeof value !== 'number') throw new RuntimeError(`La variable contadora "${s.var}" dejó de ser un número.`, s.line)
           const ok = value <= to
@@ -421,10 +606,10 @@ export function createRun(ast, options = {}) {
     } catch (err) {
       if (err instanceof RuntimeError) {
         state.status = 'error'
-        state.error = { message: err.message, line: err.line }
+        state.error = { message: err.message, line: err.line, kind: err.kind }
       } else if (err instanceof RangeError) {
         state.status = 'error'
-        state.error = { message: 'La recursión es demasiado profunda para el navegador.', line: null }
+        state.error = { message: 'Demasiadas llamadas anidadas para el navegador: ¿falta el caso base de la recursión o no se acerca a él?', line: null, kind: 'recursion' }
       } else {
         throw err
       }

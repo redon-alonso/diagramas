@@ -949,7 +949,39 @@ function inferAnd(cond, body, env, ctx, line) {
   return { iters: ranges.reduce((a, b) => a.add(b)), exact: false, maybeZero: false, finals: {} }
 }
 
+/** Valor de una condición que no depende de ninguna variable, o null. */
+function constTruth(e) {
+  if (!e) return null
+  if (e.k === 'bool') return e.v
+  if (e.k === 'not') {
+    const x = constTruth(e.x)
+    return x === null ? null : !x
+  }
+  if (e.k === 'bin' && (e.op === 'and' || e.op === 'or')) {
+    const l = constTruth(e.l)
+    const r = constTruth(e.r)
+    if (l === null || r === null) return null
+    return e.op === 'and' ? l && r : l || r
+  }
+  if (e.k === 'bin' && CMP.has(e.op)) {
+    const l = numEval(e.l, () => null)
+    const r = numEval(e.r, () => null)
+    return l === null || r === null ? null : compareNum(l, e.op, r)
+  }
+  return null
+}
+
 function inferIterations(cond, body, env, ctx, line) {
+  const constant = constTruth(cond)
+  if (constant === true) {
+    const k = ctx.freshK(line, 'vueltas del bucle (la condición siempre se cumple)')
+    ctx.warn(line, `La condición siempre se cumple: el bucle no termina nunca, salvo que salga con RETORNAR desde una función. Se usa ${k} para el número de vueltas.`)
+    return { iters: k, exact: false, finals: {} }
+  }
+  if (constant === false) {
+    ctx.note(line, 'La condición nunca se cumple: el cuerpo del bucle no se ejecuta.')
+    return { iters: C(0), exact: true, finals: {} }
+  }
   const unknown = (msg) => {
     const k = ctx.freshK(line, 'vueltas del bucle (no se pueden deducir)')
     ctx.warn(line, `${msg} El número de vueltas se representa como ${k}.`)

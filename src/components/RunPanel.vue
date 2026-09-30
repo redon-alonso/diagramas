@@ -3,6 +3,7 @@ import { computed, ref, watch, nextTick } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { formatBig } from '../core/format.js'
 import { parseInput } from '../core/interpreter.js'
+import { STEP_LIMITS } from '../composables/useRunner.js'
 
 const props = defineProps({
   runner: { type: Object, required: true },
@@ -11,13 +12,36 @@ const props = defineProps({
 })
 const emit = defineEmits(['update:speed', 'focus-line'])
 
-const { snapshot, presetInputs, playing, canRun } = props.runner
+const { snapshot, presetInputs, playing, busy, stepLimit, canRun } = props.runner
+
+// Avisos del análisis estático sobre bucles que podrían no terminar.
+const loopWarnings = computed(() =>
+  (props.cost?.warnings ?? []).filter((w) => /no termina nunca|bucle infinito|siempre se cumple|lo contrario para terminar|supera .* vueltas/.test(w.message)),
+)
+
+const errorTitle = computed(() => ({
+  loop: 'Bucle infinito detectado',
+  recursion: 'Recursión infinita detectada',
+  limit: 'Límite de pasos alcanzado',
+})[snapshot.value.error?.kind] ?? 'Error')
+
+const nextLimit = computed(() => STEP_LIMITS.find((l) => l > stepLimit.value) ?? null)
+
+function raiseLimitAndRetry() {
+  if (!nextLimit.value) return
+  stepLimit.value = nextLimit.value
+  props.runner.runToEnd()
+}
+
+const limitLabel = (l) => (l >= 1e6 ? `${l / 1e6} ${l === 1e6 ? 'millón' : 'millones'}` : `${l / 1e3} mil`)
 const answer = ref('')
 const answerInput = ref(null)
 const console_ = ref(null)
 
 const statusText = computed(() => {
   const s = snapshot.value
+  if (busy.value) return `Ejecutando… ${formatBig(s.steps)} pasos.`
+  if (s.stopped) return 'Detenido. Puedes seguir paso a paso, reproducir o continuar hasta el final.'
   switch (s.status) {
     case 'ready': return 'Preparado. Pulsa Reproducir o Paso.'
     case 'running': return s.awaiting ? `Esperando un valor para "${s.awaiting}".` : playing.value ? 'Ejecutando…' : 'En pausa.'
@@ -71,12 +95,34 @@ function submit() {
     </label>
 
     <div class="controls" role="toolbar" aria-label="Controles de ejecución">
-      <button v-if="!playing" type="button" class="btn primary" :disabled="!canRun" @click="runner.play"><AppIcon name="play" />Reproducir</button>
-      <button v-else type="button" class="btn primary" @click="runner.stop"><AppIcon name="pause" />Pausar</button>
-      <button type="button" class="btn" :disabled="!canRun || playing" title="Avanzar un paso" @click="runner.step"><AppIcon name="step" />Paso</button>
-      <button type="button" class="btn" :disabled="!canRun" title="Ejecutar hasta el final" @click="runner.runToEnd"><AppIcon name="fast" />Hasta el final</button>
+      <button v-if="busy" type="button" class="btn primary stop" @click="runner.halt"><AppIcon name="pause" />Detener</button>
+      <button v-else-if="!playing" type="button" class="btn primary" :disabled="!canRun" @click="runner.play"><AppIcon name="play" />Reproducir</button>
+      <button v-else type="button" class="btn primary" @click="runner.halt"><AppIcon name="pause" />Pausar</button>
+      <button type="button" class="btn" :disabled="!canRun || playing || busy" title="Avanzar un paso" @click="runner.step"><AppIcon name="step" />Paso</button>
+      <button type="button" class="btn" :disabled="!canRun || busy" title="Ejecutar hasta el final" @click="runner.runToEnd"><AppIcon name="fast" />Hasta el final</button>
       <button type="button" class="btn ghost icon" :disabled="snapshot.status === 'ready'" title="Reiniciar" aria-label="Reiniciar" @click="runner.reset"><AppIcon name="reset" /></button>
     </div>
+
+    <div v-if="busy" class="progress" role="progressbar" :aria-valuenow="snapshot.steps" aria-valuemin="0" :aria-valuemax="stepLimit">
+      <span :style="{ width: `${Math.min(100, (snapshot.steps / stepLimit) * 100)}%` }" />
+    </div>
+
+    <div v-if="loopWarnings.length && snapshot.status === 'ready'" class="static-warn" role="note">
+      <strong>El análisis avisa antes de ejecutar:</strong>
+      <ul>
+        <li v-for="(w, i) in loopWarnings" :key="i">
+          <button type="button" class="link" @click="emit('focus-line', w.line)">Línea {{ w.line }}</button>: {{ w.message }}
+        </li>
+      </ul>
+      <p>La ejecución lo vigila: se detendrá sola si el bucle repite exactamente el mismo estado.</p>
+    </div>
+
+    <label class="limit">
+      <span>Límite de pasos</span>
+      <select v-model.number="stepLimit" class="field" :disabled="busy">
+        <option v-for="l in STEP_LIMITS" :key="l" :value="l">{{ limitLabel(l) }}</option>
+      </select>
+    </label>
 
     <label class="speed">
       <span>Velocidad</span>
@@ -93,9 +139,12 @@ function submit() {
       </div>
     </form>
 
-    <div v-if="snapshot.error" class="error" role="alert">
-      <strong>Error<template v-if="snapshot.error.line"> en la <button type="button" class="link" @click="emit('focus-line', snapshot.error.line)">línea {{ snapshot.error.line }}</button></template>:</strong>
-      {{ snapshot.error.message }}
+    <div v-if="snapshot.error" class="error" :class="snapshot.error.kind" role="alert">
+      <strong class="err-title">{{ errorTitle }}<template v-if="snapshot.error.line"> en la <button type="button" class="link" @click="emit('focus-line', snapshot.error.line)">línea {{ snapshot.error.line }}</button></template></strong>
+      <p>{{ snapshot.error.message }}</p>
+      <button v-if="snapshot.error.kind === 'limit' && nextLimit" type="button" class="btn" @click="raiseLimitAndRetry">
+        Subir el límite a {{ limitLabel(nextLimit) }} y volver a ejecutar
+      </button>
     </div>
 
     <section class="counters">
@@ -187,6 +236,66 @@ function submit() {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.limit {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13.5px;
+}
+
+.limit select {
+  flex: 1;
+}
+
+.progress {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--panel-2);
+  overflow: hidden;
+}
+
+.progress span {
+  display: block;
+  height: 100%;
+  background: var(--ink);
+  transition: width 0.2s;
+}
+
+.btn.stop {
+  background: var(--red);
+  border-color: var(--red);
+}
+
+.static-warn {
+  padding: 8px 10px;
+  border: 1.5px solid var(--amber);
+  border-radius: var(--radius-s);
+  background: var(--amber-soft);
+  font-size: 13.5px;
+}
+
+.static-warn ul {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+
+.static-warn p {
+  margin: 0;
+  color: var(--ink-soft);
+}
+
+.err-title {
+  display: block;
+}
+
+.error p {
+  margin: 4px 0 0;
+}
+
+.error .btn {
+  margin-top: 8px;
 }
 
 .speed {

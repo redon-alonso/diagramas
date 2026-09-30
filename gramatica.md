@@ -305,3 +305,12 @@ END_FUNCTION
 ## 14. Coste de los algoritmos
 
 Cada operación elemental cuesta 1: asignación, operación aritmética, comparación, `Y`/`O`/`NO`, acceso `v[i]`, cada valor mostrado o leído, llamada a función y `RETORNAR`. `LISTA(n, x)` cuesta además `n`. Los bucles suman el coste de su cuerpo en cada vuelta y las funciones recursivas se resuelven a partir de su recurrencia (reducir el tamaño restando da coste lineal o exponencial; dividiéndolo, logarítmico o `n log n`).
+
+---
+
+## 15. Control de bucles y recursiones infinitas
+
+* **Antes de ejecutar**, el análisis avisa si ninguna variable de la condición cambia dentro del bucle, si la condición es constante (`MIENTRAS VERDADERO`) o si la variable avanza en sentido contrario al que necesita la condición.
+* **Al ejecutar**, el bucle se detiene con el aviso *Bucle infinito* en cuanto las variables de las que depende su condición vuelven a tener los mismos valores que en una vuelta anterior: a partir de ahí se repetiría siempre igual. Con `LEER` o `ALEATORIO` dentro del bucle esta comprobación no se aplica, porque el resultado puede cambiar.
+* Una función que se llama a sí misma **con los mismos valores** antes de terminar se detiene con el aviso *Recursión infinita*. También hay un máximo de 400 llamadas anidadas.
+* Siempre hay un **límite de pasos** (100 mil, 1 millón o 10 millones) y la ejecución se puede **detener** en cualquier momento.

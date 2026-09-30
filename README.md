@@ -68,6 +68,11 @@ src/composables/ estado compartido
   la página no puede hacer peticiones de red ni ejecutar scripts ajenos.
 - Todo lo leído de `localStorage` o de un fichero importado se valida (tamaño, tipos, límites,
   caracteres de control) antes de usarse.
-- Límites contra bloqueos: tamaño del código, anidamiento, pasos de ejecución y vueltas simuladas.
+- Límites contra bloqueos: tamaño del código, anidamiento, pasos de ejecución (configurable: 100 mil,
+  1 o 10 millones) y vueltas simuladas. "Hasta el final" se ejecuta por tramos: la página no se congela
+  y se puede detener.
+- Bucles infinitos: el análisis avisa antes de ejecutar (condición que no cambia o constante, variable
+  que avanza en sentido contrario) y la ejecución se detiene en cuanto las variables de las que depende
+  la condición repiten un estado anterior, o una función se llama con los mismos valores sin terminar.
 - Tipografías servidas desde el propio sitio (sin CDNs) y dependencias mínimas (solo `vue`).
 - `vercel.json` añade las cabeceras HTTP que una etiqueta `<meta>` no puede fijar (`frame-ancestors`, `nosniff`, `X-Frame-Options`…).

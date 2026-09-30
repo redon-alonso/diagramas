@@ -3,21 +3,29 @@ import { createRun, formatValue, splitTopLevel } from '../core/interpreter.js'
 import { useWorkspace } from './useWorkspace.js'
 
 const SPEEDS = [700, 380, 180, 70, 12]
-const MAX_STEPS = 500_000
+// Límites de pasos que se pueden elegir; por encima de 10 millones el navegador sufre.
+export const STEP_LIMITS = [100_000, 1_000_000, 10_000_000]
+// Tiempo máximo de cálculo seguido antes de devolver el control al navegador (ms).
+const SLICE_MS = 30
 
 export function useRunner(speedRef) {
   const { analysis } = useWorkspace()
   const snapshot = shallowRef(emptySnapshot())
   const presetInputs = ref('')
   const playing = ref(false)
+  // Ejecución rápida ("Hasta el final") en curso: se hace por tramos para no congelar la página.
+  const busy = ref(false)
+  const stepLimit = ref(STEP_LIMITS[1])
   let run = null
   let pending = null
   let queue = []
   let timer = null
+  let fastTimer = null
   let readValues = {}
+  let fast = false
 
   function emptySnapshot() {
-    return { status: 'ready', current: null, currentFn: null, frames: [], vars: [], output: [], ops: 0, steps: 0, calls: 0, maxDepth: 0, visits: {}, lastBranch: null, error: null, awaiting: null, reads: {} }
+    return { status: 'ready', current: null, currentFn: null, frames: [], vars: [], output: [], ops: 0, steps: 0, calls: 0, maxDepth: 0, visits: {}, lastBranch: null, error: null, awaiting: null, reads: {}, stopped: false }
   }
 
   const canRun = computed(() => analysis.value.ok)
@@ -38,7 +46,7 @@ export function useRunner(speedRef) {
     return { name, type, value: formatValue(value, lang), changed: changed?.name === name }
   }
 
-  function takeSnapshot() {
+  function takeSnapshot(extra = {}) {
     const s = run.state
     const lang = analysis.value.ast?.lang ?? 'es'
     const top = s.frames.at(-1)
@@ -53,18 +61,27 @@ export function useRunner(speedRef) {
       output: s.output.slice(-400),
       ops: s.ops,
       steps: s.steps,
+      maxSteps: stepLimit.value,
       visits: Object.fromEntries(s.visits),
       lastBranch: s.lastBranch,
       error: s.error,
       awaiting: pending?.awaiting ?? null,
       awaitingLine: pending?.line ?? null,
       reads: { ...readValues },
+      stopped: false,
+      ...extra,
     }
+  }
+
+  function stopFast() {
+    busy.value = false
+    fast = false
+    clearTimeout(fastTimer)
   }
 
   function reset() {
     stop()
-    fast = false
+    stopFast()
     run = null
     pending = null
     readValues = {}
@@ -73,16 +90,18 @@ export function useRunner(speedRef) {
 
   function ensureRun() {
     if (run || !canRun.value) return !!run
-    run = createRun(analysis.value.ast, { maxSteps: MAX_STEPS })
+    run = createRun(analysis.value.ast, { maxSteps: stepLimit.value })
     queue = splitTopLevel(presetInputs.value, ',;\n').map((v) => v.trim()).filter((v) => v !== '').slice(0, 1000)
     readValues = {}
     return true
   }
 
+  const finished = () => run.state.status === 'done' || run.state.status === 'error'
+
   /** Avanza una parada. Devuelve false si la ejecución no puede continuar sin intervención. */
   function advance(input) {
     if (!ensureRun()) return false
-    if (run.state.status === 'done' || run.state.status === 'error') return false
+    if (finished()) return false
     let res
     if (pending?.awaiting) {
       if (input === undefined) {
@@ -102,16 +121,16 @@ export function useRunner(speedRef) {
 
   function step() {
     stop()
-    fast = false
+    stopFast()
     advance()
     takeSnapshot()
   }
 
   function play() {
+    stopFast()
     if (!ensureRun()) return
-    if (run.state.status === 'done' || run.state.status === 'error') reset()
+    if (finished()) reset()
     ensureRun()
-    fast = false
     playing.value = true
     tick()
   }
@@ -133,16 +152,40 @@ export function useRunner(speedRef) {
     clearTimeout(timer)
   }
 
-  let fast = false
+  /** Ejecuta un tramo de pasos y cede el control al navegador para que la página siga respondiendo. */
+  function pump() {
+    if (!fast) return
+    const start = performance.now()
+    let more = true
+    while (more && performance.now() - start < SLICE_MS) {
+      for (let i = 0; i < 400 && more; i++) more = advance()
+    }
+    takeSnapshot()
+    if (more) {
+      fastTimer = setTimeout(pump, 0)
+    } else {
+      busy.value = false
+      // Si se ha parado a esperar un dato, sigue en modo rápido al recibirlo.
+      if (!snapshot.value.awaiting) fast = false
+    }
+  }
 
   function runToEnd() {
     stop()
+    stopFast()
     if (!ensureRun()) return
-    if (run.state.status === 'done' || run.state.status === 'error') { reset(); ensureRun() }
+    if (finished()) { reset(); ensureRun() }
     fast = true
-    while (advance()) { /* ejecutar hasta terminar o necesitar un dato */ }
-    takeSnapshot()
-    if (!snapshot.value.awaiting) fast = false
+    busy.value = true
+    pump()
+  }
+
+  /** Detiene la ejecución rápida o la reproducción, dejando el estado donde esté. */
+  function halt() {
+    const wasBusy = busy.value || playing.value
+    stop()
+    stopFast()
+    if (run && wasBusy && !finished()) takeSnapshot({ stopped: true })
   }
 
   function provideInput(value) {
@@ -150,18 +193,18 @@ export function useRunner(speedRef) {
     advance(String(value))
     takeSnapshot()
     if (fast) {
-      while (advance()) { /* continuar la ejecución rápida */ }
-      takeSnapshot()
-      if (!snapshot.value.awaiting) fast = false
+      busy.value = true
+      pump()
     } else if (playing.value) {
       clearTimeout(timer)
       timer = setTimeout(tick, 60)
     }
   }
 
-  // Si cambia el algoritmo, la ejecución anterior deja de tener sentido.
+  // Si cambia el algoritmo o el límite, la ejecución anterior deja de tener sentido.
   watch(() => analysis.value.ast, reset)
-  onScopeDispose(stop)
+  watch(stepLimit, reset)
+  onScopeDispose(() => { stop(); stopFast() })
 
-  return { snapshot, presetInputs, playing, canRun, step, play, stop, reset, runToEnd, provideInput }
+  return { snapshot, presetInputs, playing, busy, stepLimit, canRun, step, play, stop, halt, reset, runToEnd, provideInput }
 }

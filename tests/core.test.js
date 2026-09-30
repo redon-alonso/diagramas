@@ -162,3 +162,73 @@ test('todos los ejemplos se ejecutan sin error', () => {
     assert.equal(st.status, 'done', `${s.name}: ${st.error?.message}`)
   }
 })
+
+// ---------------------------------------------------------------------------
+// Control de bucles infinitos
+// ---------------------------------------------------------------------------
+
+test('bucle infinito detectado al repetirse el estado', () => {
+  const st = run('INICIO\n x = 1\n MIENTRAS x > 0 HACER\n  MOSTRAR x\n FIN_MIENTRAS\nFIN')
+  assert.equal(st.status, 'error')
+  assert.equal(st.error.kind, 'loop')
+  assert.equal(st.error.line, 3)
+  assert.match(st.error.message, /x = 1/)
+  assert.ok(st.steps < 20)
+})
+
+test('ciclo de periodo mayor que 1 también se detecta', () => {
+  const st = run('INICIO\n x = 0\n MIENTRAS x < 10 HACER\n  x = 1 - x\n FIN_MIENTRAS\nFIN')
+  assert.equal(st.error?.kind, 'loop')
+})
+
+test('PARA con el contador reiniciado en el cuerpo', () => {
+  const st = run('INICIO\n PARA i DESDE 1 HASTA 3 HACER\n  i = 1\n FIN_PARA\nFIN')
+  assert.equal(st.error?.kind, 'loop')
+})
+
+test('REPETIR sin avance', () => {
+  const st = run('INICIO\n n = 5\n REPETIR\n  MOSTRAR n\n HASTA_QUE n == 0\nFIN')
+  assert.equal(st.error?.kind, 'loop')
+  assert.equal(st.error.line, 5)
+})
+
+test('recursión con los mismos argumentos', () => {
+  const st = run('FUNCION f(n)\n SI n == 0 ENTONCES\n  RETORNAR 0\n FIN_SI\n RETORNAR f(n)\nFIN_FUNCION\nINICIO\n MOSTRAR f(3)\nFIN')
+  assert.equal(st.error?.kind, 'recursion')
+  assert.match(st.error.message, /f\(3\)/)
+})
+
+test('bucles normales largos no dan falsos positivos', () => {
+  const st = run('INICIO\n s = 0\n i = 0\n MIENTRAS i < 30000 HACER\n  i = i + 1\n  s = s + i % 3\n FIN_MIENTRAS\n MOSTRAR s\nFIN')
+  assert.equal(st.status, 'done')
+})
+
+test('con ALEATORIO no se aplica la detección (no es determinista)', () => {
+  const st = run('INICIO\n x = 0\n MIENTRAS x != 3 HACER\n  x = ALEATORIO(1, 3)\n FIN_MIENTRAS\n MOSTRAR x\nFIN')
+  assert.equal(st.status, 'done')
+})
+
+test('condición constante en el análisis', () => {
+  const c = cost('INICIO\n MIENTRAS VERDADERO HACER\n  MOSTRAR 1\n FIN_MIENTRAS\nFIN')
+  assert.ok(c.warnings.some((w) => /siempre se cumple/.test(w.message)))
+  const d = cost('INICIO\n MIENTRAS 2 < 1 HACER\n  MOSTRAR 1\n FIN_MIENTRAS\nFIN')
+  assert.equal(d.bigO, '1')
+})
+
+test('olvidar el incremento se detecta aunque cambien otras variables', () => {
+  const st = run('INICIO\n LEER n\n i = 1\n suma = 0\n MIENTRAS i <= n HACER\n  suma = suma + i\n FIN_MIENTRAS\nFIN', ['10'])
+  assert.equal(st.error?.kind, 'loop')
+  assert.match(st.error.message, /i = 1/)
+  assert.ok(st.steps < 20)
+})
+
+test('dependencias indirectas: no hay falso positivo', () => {
+  // La condición depende de i, que depende de paso, que cambia: el bucle termina.
+  const st = run('INICIO\n i = 0\n paso = 0\n MIENTRAS i < 50 HACER\n  paso = paso + 1\n  i = i + paso\n FIN_MIENTRAS\n MOSTRAR i\nFIN')
+  assert.equal(st.status, 'done')
+})
+
+test('asignación controlada por un SI también cuenta', () => {
+  const st = run('INICIO\n i = 0\n t = 0\n MIENTRAS i < 5 HACER\n  t = t + 1\n  SI t % 2 == 0 ENTONCES\n   i = i + 1\n  FIN_SI\n FIN_MIENTRAS\n MOSTRAR i\nFIN')
+  assert.equal(st.status, 'done')
+})

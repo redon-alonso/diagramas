@@ -87,6 +87,14 @@ const BUILTINS = [
         <li><strong>Comparar:</strong> pon varios algoritmos en la misma gráfica para ver cuál escala mejor y si es viable para un tamaño dado.</li>
       </ul>
 
+      <h3>Bucles infinitos</h3>
+      <p>
+        Antes de ejecutar, el análisis avisa de los bucles que parecen no terminar. Al ejecutar, un bucle se
+        detiene solo en cuanto las variables de su condición repiten los valores de una vuelta anterior (por
+        ejemplo, si se olvida <code>i = i + 1</code>), y una función que se llama con los mismos valores
+        también. Además hay un límite de pasos configurable y el botón <strong>Detener</strong>.
+      </p>
+
       <h3>Tus datos</h3>
       <p>
         Todo funciona dentro de tu navegador: no hay servidor ni cuentas, y el código nunca sale de tu equipo.
