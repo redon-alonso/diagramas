@@ -23,6 +23,7 @@ const errorTitle = computed(() => ({
   loop: 'Bucle infinito detectado',
   recursion: 'Recursión infinita detectada',
   limit: 'Límite de pasos alcanzado',
+  internal: 'Fallo interno',
 })[snapshot.value.error?.kind] ?? 'Error')
 
 const nextLimit = computed(() => STEP_LIMITS.find((l) => l > stepLimit.value) ?? null)

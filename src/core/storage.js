@@ -41,7 +41,7 @@ function newId() {
 }
 
 /** Elimina caracteres de control (salvo saltos de línea y tabuladores) y recorta. */
-function cleanText(value, max, { multiline = false } = {}) {
+export function cleanText(value, max, { multiline = false } = {}) {
   if (typeof value !== 'string') return ''
   const pattern = multiline ? /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F‪-‮⁦-⁩]/g : /[\u0000-\u001F\u007F‪-‮⁦-⁩]/g
   return value.replace(/\r\n?/g, '\n').replace(pattern, '').slice(0, max)

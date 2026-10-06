@@ -611,7 +611,10 @@ export function createRun(ast, options = {}) {
         state.status = 'error'
         state.error = { message: 'Demasiadas llamadas anidadas para el navegador: ¿falta el caso base de la recursión o no se acerca a él?', line: null, kind: 'recursion' }
       } else {
-        throw err
+        // Fallo interno: se detiene la ejecución con un aviso en vez de dejar la página colgada.
+        console.error(err)
+        state.status = 'error'
+        state.error = { message: 'La ejecución se detuvo por un fallo interno de Transcriptor, no de tu código. Prueba a reiniciarla.', line: null, kind: 'internal' }
       }
     }
   }

@@ -8,20 +8,41 @@ import { useLibrary } from './useLibrary.js'
 
 const cache = new Map()
 
+// Si una fase falla por un error interno (no del código del alumno), las demás siguen funcionando.
+const PARSE_CRASH = 'Transcriptor no ha podido leer este código por un fallo interno. No es un error tuyo: prueba a cambiar algo o recarga la página.'
+const COST_CRASH = 'No se ha podido calcular el coste por un fallo interno de Transcriptor, no de tu código. El diagrama y la ejecución siguen funcionando.'
+
 /** Analiza un código completo (con caché, se usa también en la vista de comparación). */
 export function analyzeSource(src) {
   if (cache.has(src)) return cache.get(src)
-  const parse = parseProgram(src)
+  let parse
+  try {
+    parse = parseProgram(src)
+  } catch (err) {
+    console.error(err)
+    return { source: src, ok: false, parse: { ok: false, ast: null, lang: 'es', diagnostics: [] }, ast: null, cost: null, flow: null, costError: null, diagnostics: [{ severity: 'error', line: 1, message: PARSE_CRASH }] }
+  }
   let cost = null
   let flow = null
+  let costError = null
   if (parse.ok) {
-    cost = analyzeCost(parse.ast)
-    flow = buildFlowchart(parse.ast)
+    try {
+      cost = analyzeCost(parse.ast)
+    } catch (err) {
+      console.error(err)
+      costError = COST_CRASH
+    }
+    try {
+      flow = buildFlowchart(parse.ast)
+    } catch (err) {
+      console.error(err)
+      flow = []
+    }
   }
   const diagnostics = [...parse.diagnostics, ...(cost?.warnings ?? [])]
   if (cost?.failed) diagnostics.push({ severity: 'error', line: parse.ast.startLine, message: cost.message })
   diagnostics.sort((a, b) => a.line - b.line)
-  const result = { source: src, ok: parse.ok && !cost?.failed, parse, ast: parse.ast, cost, flow, diagnostics }
+  const result = { source: src, ok: parse.ok && !cost?.failed, parse, ast: parse.ast, cost, flow, costError, diagnostics }
   if (cache.size > 60) cache.delete(cache.keys().next().value)
   cache.set(src, result)
   return result

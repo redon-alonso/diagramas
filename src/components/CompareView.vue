@@ -50,7 +50,7 @@ const selected = computed(() =>
     .filter((c) => slots.value.has(c.key))
     .map((c) => {
       const a = analyzeSource(c.code)
-      return { ...c, color: SLOTS[slots.value.get(c.key)], analysis: a, ok: a.ok }
+      return { ...c, color: SLOTS[slots.value.get(c.key)], analysis: a, ok: a.ok && !!a.cost }
     }),
 )
 
@@ -79,7 +79,8 @@ const groupedCandidates = computed(() => {
 
 function summary(code) {
   const a = analyzeSource(code)
-  return a.ok ? { text: `O(${a.cost.bigO})`, cls: `g-${a.cost.growthClass.id}` } : { text: 'con errores', cls: 'err' }
+  if (!a.ok) return { text: 'con errores', cls: 'err' }
+  return a.cost ? { text: `O(${a.cost.bigO})`, cls: `g-${a.cost.growthClass.id}` } : { text: 'sin coste', cls: 'err' }
 }
 </script>
 

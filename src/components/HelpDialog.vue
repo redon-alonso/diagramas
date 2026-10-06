@@ -100,6 +100,7 @@ const BUILTINS = [
         Todo funciona dentro de tu navegador: no hay servidor ni cuentas, y el código nunca sale de tu equipo.
         Los algoritmos guardados se quedan en el almacenamiento local de este navegador; si borras sus datos, se pierden.
         Usa <em>Exportar todo</em> en la biblioteca para hacer una copia en un fichero.
+        Con <em>Compartir</em> creas un enlace que lleva el algoritmo dentro: solo sale de tu equipo si tú envías ese enlace.
       </p>
 
       <h3>Atajos</h3>

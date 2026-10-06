@@ -8,11 +8,14 @@ import RunPanel from './components/RunPanel.vue'
 import CompareView from './components/CompareView.vue'
 import LibraryDrawer from './components/LibraryDrawer.vue'
 import HelpDialog from './components/HelpDialog.vue'
+import ShareDialog from './components/ShareDialog.vue'
 import { useWorkspace } from './composables/useWorkspace.js'
 import { useLibrary } from './composables/useLibrary.js'
 import { useRunner } from './composables/useRunner.js'
 import { loadPrefs, savePrefs } from './core/storage.js'
 import { classOf } from './core/format.js'
+import { encodeShare, decodeShare, shareSupported } from './core/share.js'
+import { DEFAULT_CODE } from './core/samples.js'
 
 const ws = useWorkspace()
 const library = useLibrary()
@@ -151,6 +154,43 @@ function saveAndOpen() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Compartir por enlace (el código va comprimido en el fragmento #c=… de la URL)
+// ---------------------------------------------------------------------------
+const canShare = shareSupported()
+const shareLink = ref(null)
+
+async function share() {
+  if (!code.value.trim()) {
+    showToast('Escribe algo de código antes de compartirlo.', 'error')
+    return
+  }
+  try {
+    const hash = await encodeShare({ code: code.value, name: name.value.trim() })
+    shareLink.value = `${location.origin}${location.pathname}#${hash}`
+  } catch (err) {
+    console.error(err)
+    showToast('No se ha podido crear el enlace en este navegador.', 'error')
+  }
+}
+
+async function openFromLink() {
+  let shared
+  try {
+    shared = await decodeShare(location.hash)
+  } catch (err) {
+    showToast(err.message, 'error')
+  }
+  if (shared === null) return
+  // Se quita del navegador para que recargar no vuelva a abrirlo encima de lo que escribas después.
+  history.replaceState(null, '', location.pathname + location.search)
+  if (!shared || shared.code === code.value) return
+  const target = { code: shared.code, name: shared.name || 'Algoritmo compartido', id: null }
+  // Si solo está el ejemplo de bienvenida no hay nada que perder: se abre directamente.
+  if (dirty.value && code.value.trim() && code.value !== DEFAULT_CODE) pendingOpen.value = target
+  else doOpen(target)
+}
+
 function beforeUnload(event) {
   if (dirty.value && savedItem.value) event.preventDefault()
 }
@@ -158,10 +198,13 @@ function beforeUnload(event) {
 onMounted(() => {
   window.addEventListener('keydown', onKeydown)
   window.addEventListener('beforeunload', beforeUnload)
+  window.addEventListener('hashchange', openFromLink)
+  if (canShare) openFromLink()
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
   window.removeEventListener('beforeunload', beforeUnload)
+  window.removeEventListener('hashchange', openFromLink)
 })
 
 watch(() => snap.value.status, (s, prev) => {
@@ -198,6 +241,7 @@ watch(() => snap.value.status, (s, prev) => {
 
       <div class="tools">
         <button type="button" class="btn ghost" @click="libraryOpen = true"><AppIcon name="library" /><span class="hide-sm">Biblioteca</span><span class="badge-num">{{ library.items.value.length }}</span></button>
+        <button v-if="canShare && view === 'workshop'" type="button" class="btn ghost" title="Crear un enlace con este algoritmo" @click="share"><AppIcon name="share" /><span class="hide-sm">Compartir</span></button>
         <button type="button" class="btn ghost icon" aria-label="Ayuda" title="Ayuda" @click="helpOpen = true"><AppIcon name="help" /></button>
         <button type="button" class="btn ghost icon" :aria-label="themeLabel[prefs.theme]" :title="themeLabel[prefs.theme]" @click="cycleTheme"><AppIcon :name="themeIcon[prefs.theme]" /></button>
       </div>
@@ -247,6 +291,7 @@ watch(() => snap.value.status, (s, prev) => {
         <div v-show="sideTab === 'cost'" id="panel-cost" class="side-body" role="tabpanel" aria-labelledby="tab-cost">
           <CostPanel
             :cost="shown?.cost ?? null"
+            :error="shown?.costError ?? null"
             :code="shown?.source ?? ''"
             :stale="stale"
             :hover-line="hoverLine"
@@ -264,6 +309,7 @@ watch(() => snap.value.status, (s, prev) => {
 
     <LibraryDrawer v-if="libraryOpen" @close="libraryOpen = false" @opened="view = 'workshop'" />
     <HelpDialog v-if="helpOpen" @close="helpOpen = false" />
+    <ShareDialog v-if="shareLink" :link="shareLink" :name="name.trim()" @close="shareLink = null" />
 
     <div v-if="pendingOpen" class="confirm-bar" role="alertdialog" aria-labelledby="confirm-text">
       <p id="confirm-text">Tienes cambios sin guardar en <strong>{{ name || 'el algoritmo actual' }}</strong>. ¿Qué quieres hacer antes de abrir <strong>{{ pendingOpen.name }}</strong>?</p>

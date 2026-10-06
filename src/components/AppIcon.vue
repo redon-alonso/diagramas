@@ -34,6 +34,7 @@ const PATHS = {
   alert: 'M12 3l10 18H2z M12 10v5 M12 18h.01',
   file: 'M6 3h9l4 4v14H6z M14 3v5h5',
   edit: 'M4 20h4L19 9l-4-4L4 16z M13.5 6.5l4 4',
+  share: 'M18 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M6 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M18 22a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M8.6 13.5l6.8 4 M15.4 6.5l-6.8 4',
 }
 
 const d = computed(() => PATHS[props.name] ?? '')

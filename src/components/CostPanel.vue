@@ -10,6 +10,7 @@ const props = defineProps({
   code: { type: String, default: '' },
   stale: { type: Boolean, default: false },
   hoverLine: { type: Number, default: null },
+  error: { type: String, default: null },
 })
 const emit = defineEmits(['hover-line', 'focus-line'])
 
@@ -77,7 +78,7 @@ const series = computed(() => (props.cost ? [{ id: 'self', name: 'Este algoritmo
 
 <template>
   <div class="cost" :class="{ stale }">
-    <p v-if="!cost" class="empty">Corrige los errores del código para calcular el coste.</p>
+    <p v-if="!cost" class="empty" :role="error ? 'status' : null">{{ error ?? 'Corrige los errores del código para calcular el coste.' }}</p>
     <template v-else>
       <section class="headline" :class="`g-${cost.growthClass.id}`">
         <div class="big">
