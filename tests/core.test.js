@@ -244,3 +244,11 @@ test('MIENTRAS anidado cuya variable no se reinicia: sin símbolos sueltos', () 
   assert.ok(!c.worst.hasSymbol('j'), c.worst.toString())
   assert.ok(!c.lines.get(6).count.hasSymbol('j'), c.lines.get(6).count.toString())
 })
+
+test('MIENTRAS con límite fijo y otro bucle dentro que depende de su variable', () => {
+  // Antes fallaba con "Cannot read properties of undefined (reading 'pow')".
+  const c = cost('INICIO\n i = 0\n MIENTRAS i < 10 HACER\n  j = 0\n  MIENTRAS j < i HACER\n   j = j + 1\n  FIN_MIENTRAS\n  i = i + 1\n FIN_MIENTRAS\nFIN')
+  assert.equal(c.lines.get(5).count.toString(), '55')
+  const d = cost('INICIO\n i = 10\n MIENTRAS i > 0 HACER\n  j = 1\n  MIENTRAS j < i HACER\n   j = j * 2\n  FIN_MIENTRAS\n  i = i - 1\n FIN_MIENTRAS\nFIN')
+  assert.ok(!d.failed, d.message)
+})

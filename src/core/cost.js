@@ -23,6 +23,8 @@ const CMP = new Set(['==', '!=', '>', '<', '>=', '<='])
 const FLIP = { '<': '>', '>': '<', '<=': '>=', '>=': '<=', '==': '==', '!=': '!=' }
 const NEGATE = { '<': '>=', '>': '<=', '<=': '>', '>=': '<', '==': '!=', '!=': '==' }
 const SIM_LIMIT = 1_000_000
+// Vueltas simuladas cuyo coste se suma una a una; con más, se usa una cota superior.
+const SUM_VALUES_LIMIT = 2_000
 const PROBE_1 = 1_000_003
 const PROBE_2 = 1_000_000_007
 
@@ -846,7 +848,12 @@ function inferSingle(cond, body, env, ctx, line) {
       let x = v0c
       let n = 0
       let ok = true
+      // Valores que toma v en cada vuelta: si el cuerpo depende de v, su coste se suma vuelta a vuelta.
+      const values = []
+      let top = v0c
       while (compareNum(x, op, bc)) {
+        if (values.length < SUM_VALUES_LIMIT) values.push(x)
+        top = Math.max(top, x)
         const next = numEval(single, (name) => (name === v ? x : lookup(name)))
         if (next === null || !Number.isFinite(next)) { ok = false; break }
         x = next
@@ -857,7 +864,8 @@ function inferSingle(cond, body, env, ctx, line) {
       }
       if (ok) {
         ctx.note(line, `Vueltas calculadas simulando el bucle: ${n}.`)
-        return { iters: C(n), exact: true, v, finals: { [v]: C(x) } }
+        const all = values.length === n
+        return { iters: C(n), exact: true, v, values: all ? values : null, bound: C(top), finals: { [v]: C(x) } }
       }
     }
     if (!Bp) continue
@@ -1035,6 +1043,19 @@ function inferIterations(cond, body, env, ctx, line) {
 function aggregator(info, iters, ctx, line) {
   return (p) => {
     if (info.v && p.hasSymbol(info.v)) {
+      if (info.values) {
+        // Las partes constantes se suman como números: sumar fracciones aproximadas (p. ej. log₂ 3)
+        // haría crecer el denominador hasta desbordarse.
+        let num = 0
+        let rest = Poly.zero()
+        for (const x of info.values) {
+          const term = p.substitute(info.v, C(x))
+          const k = term.constValue()
+          if (k !== null) num += k
+          else rest = rest.add(term)
+        }
+        return rest.add(Poly.const(num))
+      }
       if (info.range) return sumOver(p, info.v, info.range.from, info.range.to).poly
       ctx.exact = false
       ctx.note(line, `El coste del cuerpo depende de "${info.v}": se usa una cota superior.`)
