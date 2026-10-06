@@ -1,0 +1,7 @@
+# Los issues en blanco deben seguir activados: el enlace «Informar de este fallo» de la aplicación
+# abre un issue normal con el cuerpo ya rellenado (src/core/report.js).
+blank_issues_enabled: true
+contact_links:
+  - name: Abrir Transcriptor
+    url: https://diagramas-inky.vercel.app/
+    about: Si el error salió dentro de la aplicación, usa su enlace «Informar de este fallo»; rellena el informe con tu código.

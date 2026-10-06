@@ -1,0 +1,65 @@
+name: Informar de un error
+description: Algo no funciona, la página falla o el coste calculado no cuadra.
+title: "[Error] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Gracias por ayudar a mejorar Transcriptor. Cuantos más detalles, antes se podrá arreglar.
+
+        **Consejo:** si el error salió dentro de la aplicación, usa el enlace *Informar de este fallo* que aparece junto al mensaje (o *Ayuda → Informar de un error*): rellena este informe por ti con tu código.
+
+  - type: textarea
+    id: que-ha-pasado
+    attributes:
+      label: ¿Qué ha pasado?
+      description: Cuenta qué estabas haciendo y qué ocurrió.
+      placeholder: Al pulsar «Ejecutar» con este algoritmo, la página se quedó en blanco…
+    validations:
+      required: true
+
+  - type: textarea
+    id: esperado
+    attributes:
+      label: ¿Qué esperabas que pasara?
+      placeholder: Que el bucle diera 10 vueltas y mostrara la suma.
+
+  - type: dropdown
+    id: parte
+    attributes:
+      label: ¿En qué parte de la aplicación?
+      multiple: true
+      options:
+        - Editor (resaltado o errores marcados en el código)
+        - Diagrama de flujo
+        - Coste (T(n), O grande, desglose por línea)
+        - Ejecución paso a paso
+        - Comparar algoritmos
+        - Biblioteca, importar o exportar
+        - Compartir por enlace
+        - Otra
+
+  - type: textarea
+    id: codigo
+    attributes:
+      label: Código
+      description: El pseudocódigo con el que ocurre. Sin él es muy difícil reproducir el error. También puedes pegar un enlace creado con «Compartir».
+      render: text
+
+  - type: textarea
+    id: mensaje
+    attributes:
+      label: Mensaje que apareció
+      description: Si la aplicación mostró un aviso o un error, cópialo aquí tal cual.
+
+  - type: input
+    id: navegador
+    attributes:
+      label: Navegador y dispositivo
+      placeholder: Chrome en Windows, Safari en iPhone…
+
+  - type: markdown
+    attributes:
+      value: |
+        Los informes son **públicos**: no incluyas datos personales en el código ni en la descripción.
