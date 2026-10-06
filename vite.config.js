@@ -1,5 +1,9 @@
+import { readFileSync } from 'node:fs'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+
+// Versión de package.json, disponible en el código como __APP_VERSION__ (se usa en los informes de errores).
+const { version } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'))
 
 // Política de seguridad de contenidos que se inyecta solo en la build de producción
 // (en desarrollo Vite necesita estilos en línea y websockets para la recarga en caliente).
@@ -33,6 +37,7 @@ function contentSecurityPolicy() {
 
 export default defineConfig({
   plugins: [vue(), contentSecurityPolicy()],
+  define: { __APP_VERSION__: JSON.stringify(version) },
   base: './',
   // Solo en este equipo (no en la red local), y en IPv4 para que funcionen tanto
   // http://localhost como http://127.0.0.1.

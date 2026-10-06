@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch, nextTick } from 'vue'
 import AppIcon from './AppIcon.vue'
+import ReportLink from './ReportLink.vue'
 import { formatBig } from '../core/format.js'
 import { parseInput } from '../core/interpreter.js'
 import { STEP_LIMITS } from '../composables/useRunner.js'
@@ -9,6 +10,7 @@ const props = defineProps({
   runner: { type: Object, required: true },
   cost: { type: Object, default: null },
   speed: { type: Number, default: 3 },
+  reportUrl: { type: String, default: null },
 })
 const emit = defineEmits(['update:speed', 'focus-line'])
 
@@ -143,6 +145,7 @@ function submit() {
     <div v-if="snapshot.error" class="error" :class="snapshot.error.kind" role="alert">
       <strong class="err-title">{{ errorTitle }}<template v-if="snapshot.error.line"> en la <button type="button" class="link" @click="emit('focus-line', snapshot.error.line)">línea {{ snapshot.error.line }}</button></template></strong>
       <p>{{ snapshot.error.message }}</p>
+      <ReportLink v-if="snapshot.error.kind === 'internal' && reportUrl" :url="reportUrl" />
       <button v-if="snapshot.error.kind === 'limit' && nextLimit" type="button" class="btn" @click="raiseLimitAndRetry">
         Subir el límite a {{ limitLabel(nextLimit) }} y volver a ejecutar
       </button>

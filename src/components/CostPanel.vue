@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import GrowthChart from './GrowthChart.vue'
+import ReportLink from './ReportLink.vue'
 import { evalAt, COST_MODEL } from '../core/cost.js'
 import { classOf, formatBig, formatDuration, viability, OPS_PER_SECOND } from '../core/format.js'
 import { formatSymbol, bigOWithDifferences } from '../core/poly.js'
@@ -11,6 +12,7 @@ const props = defineProps({
   stale: { type: Boolean, default: false },
   hoverLine: { type: Number, default: null },
   error: { type: String, default: null },
+  reportUrl: { type: String, default: null },
 })
 const emit = defineEmits(['hover-line', 'focus-line'])
 
@@ -78,7 +80,10 @@ const series = computed(() => (props.cost ? [{ id: 'self', name: 'Este algoritmo
 
 <template>
   <div class="cost" :class="{ stale }">
-    <p v-if="!cost" class="empty" :role="error ? 'status' : null">{{ error ?? 'Corrige los errores del código para calcular el coste.' }}</p>
+    <template v-if="!cost">
+      <p class="empty" :role="error ? 'status' : null">{{ error ?? 'Corrige los errores del código para calcular el coste.' }}</p>
+      <ReportLink v-if="error && reportUrl" :url="reportUrl" />
+    </template>
     <template v-else>
       <section class="headline" :class="`g-${cost.growthClass.id}`">
         <div class="big">

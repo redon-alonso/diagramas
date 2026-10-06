@@ -15,6 +15,7 @@ import { useRunner } from './composables/useRunner.js'
 import { loadPrefs, savePrefs } from './core/storage.js'
 import { classOf } from './core/format.js'
 import { encodeShare, decodeShare, shareSupported } from './core/share.js'
+import { buildIssueUrl } from './core/report.js'
 import { DEFAULT_CODE } from './core/samples.js'
 
 const ws = useWorkspace()
@@ -155,6 +156,23 @@ function saveAndOpen() {
 }
 
 // ---------------------------------------------------------------------------
+// Informes de errores: un issue de GitHub ya rellenado que el usuario revisa antes de publicarlo.
+// Los computed son perezosos: solo se construyen cuando se muestra el enlace.
+// ---------------------------------------------------------------------------
+const reportInfo = { version: __APP_VERSION__, userAgent: navigator.userAgent }
+const reportUrl = computed(() => buildIssueUrl({ ...reportInfo, code: code.value }))
+const costReportUrl = computed(() => {
+  const a = shown.value
+  if (!a?.costError) return null
+  return buildIssueUrl({ ...reportInfo, title: 'Fallo al calcular el coste', message: a.costError, detail: a.costErrorDetail, code: a.source })
+})
+const runReportUrl = computed(() => {
+  const err = snap.value.error
+  if (err?.kind !== 'internal') return null
+  return buildIssueUrl({ ...reportInfo, title: 'Fallo interno al ejecutar', message: err.message, detail: err.detail, code: code.value })
+})
+
+// ---------------------------------------------------------------------------
 // Compartir por enlace (el código va comprimido en el fragmento #c=… de la URL)
 // ---------------------------------------------------------------------------
 const canShare = shareSupported()
@@ -292,6 +310,7 @@ watch(() => snap.value.status, (s, prev) => {
           <CostPanel
             :cost="shown?.cost ?? null"
             :error="shown?.costError ?? null"
+            :report-url="costReportUrl"
             :code="shown?.source ?? ''"
             :stale="stale"
             :hover-line="hoverLine"
@@ -300,7 +319,7 @@ watch(() => snap.value.status, (s, prev) => {
           />
         </div>
         <div v-show="sideTab === 'run'" id="panel-run" class="side-body" role="tabpanel" aria-labelledby="tab-run">
-          <RunPanel v-model:speed="speed" :runner="runner" :cost="analysis.ok ? analysis.cost : null" @focus-line="onNodeClick" />
+          <RunPanel v-model:speed="speed" :runner="runner" :cost="analysis.ok ? analysis.cost : null" :report-url="runReportUrl" @focus-line="onNodeClick" />
         </div>
       </aside>
     </main>
@@ -308,7 +327,7 @@ watch(() => snap.value.status, (s, prev) => {
     <CompareView v-else class="compare-main" @edit="openFromCompare" />
 
     <LibraryDrawer v-if="libraryOpen" @close="libraryOpen = false" @opened="view = 'workshop'" />
-    <HelpDialog v-if="helpOpen" @close="helpOpen = false" />
+    <HelpDialog v-if="helpOpen" :report-url="reportUrl" @close="helpOpen = false" />
     <ShareDialog v-if="shareLink" :link="shareLink" :name="name.trim()" @close="shareLink = null" />
 
     <div v-if="pendingOpen" class="confirm-bar" role="alertdialog" aria-labelledby="confirm-text">

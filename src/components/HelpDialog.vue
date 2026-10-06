@@ -1,7 +1,9 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import AppIcon from './AppIcon.vue'
+import ReportLink from './ReportLink.vue'
 
+defineProps({ reportUrl: { type: String, default: null } })
 const emit = defineEmits(['close'])
 const dialog = ref(null)
 onMounted(() => dialog.value.showModal())
@@ -109,6 +111,15 @@ const BUILTINS = [
         <li><kbd>Tab</kbd> / <kbd>Mayús</kbd> + <kbd>Tab</kbd> en el editor: añadir o quitar sangría. <kbd>Esc</kbd> y luego <kbd>Tab</kbd> para salir del editor.</li>
         <li>En el diagrama: flechas para moverlo, <kbd>+</kbd> y <kbd>−</kbd> para ampliar, <kbd>0</kbd> para ajustarlo.</li>
       </ul>
+
+      <template v-if="reportUrl">
+        <h3>¿Has encontrado un error?</h3>
+        <p>
+          Si algo no funciona o el coste calculado no te cuadra, cuéntanoslo: el informe incluye el código que tienes
+          ahora en el editor, para que podamos repetir lo que te ha pasado. Necesitas una cuenta de GitHub.
+        </p>
+        <ReportLink :url="reportUrl" label="Informar de un error" />
+      </template>
     </div>
   </dialog>
 </template>

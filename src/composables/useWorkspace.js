@@ -12,6 +12,13 @@ const cache = new Map()
 const PARSE_CRASH = 'Transcriptor no ha podido leer este código por un fallo interno. No es un error tuyo: prueba a cambiar algo o recarga la página.'
 const COST_CRASH = 'No se ha podido calcular el coste por un fallo interno de Transcriptor, no de tu código. El diagrama y la ejecución siguen funcionando.'
 
+/** Resumen de un error inesperado para los informes: tipo, mensaje y primeras líneas de la pila. */
+export function errorDetail(err) {
+  const head = `${err?.name ?? 'Error'}: ${err?.message ?? String(err)}`
+  const stack = String(err?.stack ?? '').split('\n').slice(1, 4).map((l) => l.trim()).join('\n')
+  return stack ? `${head}\n${stack}` : head
+}
+
 /** Analiza un código completo (con caché, se usa también en la vista de comparación). */
 export function analyzeSource(src) {
   if (cache.has(src)) return cache.get(src)
@@ -25,12 +32,14 @@ export function analyzeSource(src) {
   let cost = null
   let flow = null
   let costError = null
+  let costErrorDetail = null
   if (parse.ok) {
     try {
       cost = analyzeCost(parse.ast)
     } catch (err) {
       console.error(err)
       costError = COST_CRASH
+      costErrorDetail = errorDetail(err)
     }
     try {
       flow = buildFlowchart(parse.ast)
@@ -42,7 +51,7 @@ export function analyzeSource(src) {
   const diagnostics = [...parse.diagnostics, ...(cost?.warnings ?? [])]
   if (cost?.failed) diagnostics.push({ severity: 'error', line: parse.ast.startLine, message: cost.message })
   diagnostics.sort((a, b) => a.line - b.line)
-  const result = { source: src, ok: parse.ok && !cost?.failed, parse, ast: parse.ast, cost, flow, costError, diagnostics }
+  const result = { source: src, ok: parse.ok && !cost?.failed, parse, ast: parse.ast, cost, flow, costError, costErrorDetail, diagnostics }
   if (cache.size > 60) cache.delete(cache.keys().next().value)
   cache.set(src, result)
   return result

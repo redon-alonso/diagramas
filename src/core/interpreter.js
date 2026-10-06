@@ -614,7 +614,7 @@ export function createRun(ast, options = {}) {
         // Fallo interno: se detiene la ejecución con un aviso en vez de dejar la página colgada.
         console.error(err)
         state.status = 'error'
-        state.error = { message: 'La ejecución se detuvo por un fallo interno de Transcriptor, no de tu código. Prueba a reiniciarla.', line: null, kind: 'internal' }
+        state.error = { message: 'La ejecución se detuvo por un fallo interno de Transcriptor, no de tu código. Prueba a reiniciarla.', line: null, kind: 'internal', detail: `${err?.name ?? 'Error'}: ${err?.message ?? String(err)}` }
       }
     }
   }
