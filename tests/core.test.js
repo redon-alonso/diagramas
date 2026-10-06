@@ -232,3 +232,15 @@ test('asignación controlada por un SI también cuenta', () => {
   const st = run('INICIO\n i = 0\n t = 0\n MIENTRAS i < 5 HACER\n  t = t + 1\n  SI t % 2 == 0 ENTONCES\n   i = i + 1\n  FIN_SI\n FIN_MIENTRAS\n MOSTRAR i\nFIN')
   assert.equal(st.status, 'done')
 })
+
+test('MIENTRAS: cambiar un elemento de la lista de la condición no es "bucle infinito"', () => {
+  const noInfinite = (c) => assert.ok(!c.warnings.some((w) => /no termina nunca/.test(w.message)), JSON.stringify(c.warnings))
+  noInfinite(cost('INICIO\n v = [0, 0]\n MIENTRAS v[1] < 5 HACER\n  v[1] = v[1] + 1\n FIN_MIENTRAS\nFIN'))
+  noInfinite(cost('FUNCION sube(v)\n v[1] = v[1] + 1\nFIN_FUNCION\nINICIO\n v = [0]\n MIENTRAS v[1] < 5 HACER\n  sube(v)\n FIN_MIENTRAS\nFIN'))
+})
+
+test('MIENTRAS anidado cuya variable no se reinicia: sin símbolos sueltos', () => {
+  const c = cost('INICIO\n LEER n\n i = 0\n j = 0\n MIENTRAS i < n HACER\n  MIENTRAS j < n HACER\n   j = j + 1\n  FIN_MIENTRAS\n  i = i + 1\n FIN_MIENTRAS\nFIN')
+  assert.ok(!c.worst.hasSymbol('j'), c.worst.toString())
+  assert.ok(!c.lines.get(6).count.hasSymbol('j'), c.lines.get(6).count.toString())
+})

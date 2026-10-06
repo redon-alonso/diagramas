@@ -12,7 +12,7 @@
 //   · MIENTRAS / REPETIR: la condición se evalúa en cada comprobación
 
 import { Poly, bigO, bigOWithDifferences, sumOver, mainSymbol, degreeOf, logSymbol, expSymbol, formatSymbol, compareGrowth, growthClass } from './poly.js'
-import { walk, walkExpr } from './parser.js'
+import { walk, walkExpr, stmtExprs } from './parser.js'
 
 export const COST_MODEL = Object.freeze({
   assign: 1, arith: 1, compare: 1, logic: 1, index: 1, io: 1, builtin: 1, call: 1, ret: 1, forInit: 1, forStep: 2,
@@ -172,6 +172,24 @@ function assignedVars(stmts) {
     if (s.type === 'assign' && s.target.indexes.length === 0) out.add(s.target.name)
     else if (s.type === 'read') s.targets.forEach((t) => { if (t.indexes.length === 0) out.add(t.name) })
     else if (s.type === 'for') out.add(s.var)
+  })
+  return out
+}
+
+/**
+ * Variables cuyo valor puede cambiar en un bloque, incluidas las listas: las modificadas con
+ * v[i] = x (o LEER v[i]) y las que se pasan a una función, que puede modificarlas.
+ */
+function mutatedVars(stmts) {
+  const out = assignedVars(stmts)
+  walk(stmts, (s) => {
+    if (s.type === 'assign' && s.target.indexes.length) out.add(s.target.name)
+    else if (s.type === 'read') s.targets.forEach((t) => out.add(t.name))
+    for (const e of stmtExprs(s)) {
+      walkExpr(e, (x) => {
+        if (x.k === 'call' && !x.builtin) x.args.forEach((a) => { if (a.k === 'var') out.add(a.name) })
+      })
+    }
   })
   return out
 }
@@ -734,8 +752,24 @@ function analyzeIf(s, env, defined, ctx) {
 /** Prepara el entorno del cuerpo de un bucle: lo que cambia dentro deja de ser conocido. */
 function loopBodyEnv(env, body) {
   const bodyEnv = new Map(env)
-  for (const v of assignedVars(body)) bodyEnv.set(v, null)
+  // Lo que solo avanza en un sentido conserva su valor de entrada como cota en cada vuelta
+  // (p. ej. un MIENTRAS interior cuya variable no se reinicia): así no se usa su nombre como dato.
+  for (const v of assignedVars(body)) forgetKeepingBound(env, bodyEnv, body, v)
   return bodyEnv
+}
+
+/** Olvida el valor de `v` en `target`; si el bloque solo lo mueve en un sentido, guarda la cota @up/@down. */
+function forgetKeepingBound(env, target, body, v) {
+  const before = env.get(v)
+  const { list, read } = assignmentsOf(body, v)
+  const steps = read ? [null] : list.map((a) => stepOf(a.stmt.expr, v, env))
+  const up = steps.length > 0 && steps.every((c) => c !== null && c > 0)
+  const down = steps.length > 0 && steps.every((c) => c !== null && c < 0)
+  const bound = before instanceof Poly ? before : env.get(`@${up ? 'up' : 'down'}:${v}`)
+  target.delete(`@up:${v}`)
+  target.delete(`@down:${v}`)
+  if ((up || down) && bound instanceof Poly) target.set(`@${up ? 'up' : 'down'}:${v}`, bound)
+  target.set(v, null)
 }
 
 /** Paso constante de una asignación v = v + c (o null). */
@@ -758,18 +792,7 @@ function stepOf(f, v, env) {
 }
 
 function afterLoopEnv(env, body, finals = {}) {
-  for (const v of assignedVars(body)) {
-    const before = env.get(v)
-    const { list, read } = assignmentsOf(body, v)
-    const steps = read ? [null] : list.map((a) => stepOf(a.stmt.expr, v, env))
-    const up = steps.length > 0 && steps.every((c) => c !== null && c > 0)
-    const down = steps.length > 0 && steps.every((c) => c !== null && c < 0)
-    const bound = before instanceof Poly ? before : env.get(`@${up ? 'up' : 'down'}:${v}`)
-    env.delete(`@up:${v}`)
-    env.delete(`@down:${v}`)
-    if ((up || down) && bound instanceof Poly) env.set(`@${up ? 'up' : 'down'}:${v}`, bound)
-    env.set(v, null)
-  }
+  for (const v of assignedVars(body)) forgetKeepingBound(env, env, body, v)
   for (const [k, v] of Object.entries(finals)) if (v) env.set(k, v)
 }
 
@@ -989,9 +1012,9 @@ function inferIterations(cond, body, env, ctx, line) {
   }
   if (!cond) return unknown('La condición no es válida.')
   const condVars = exprVars(cond)
-  const assignedAll = assignedVars(body)
+  const mutated = mutatedVars(body)
   const touchesCalls = (() => { let found = false; walkExpr(cond, (x) => { if (x.k === 'call' && !x.builtin) found = true }); return found })()
-  if (![...condVars].some((v) => assignedAll.has(v)) && !touchesCalls) {
+  if (![...condVars].some((v) => mutated.has(v)) && !touchesCalls) {
     const k = ctx.freshK(line, 'vueltas del bucle (su condición no cambia)')
     ctx.warn(line, `Ninguna variable de la condición cambia dentro del bucle: si la condición se cumple una vez, el bucle no termina nunca. Se usa ${k} para el número de vueltas.`)
     return { iters: k, exact: false, finals: {} }
